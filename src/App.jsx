@@ -3,7 +3,7 @@ import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from "recharts";
-import { supabase, getUserId } from "./supabase";
+import { supabase, signInWithGoogle, signOut } from "./supabase";
 /* =========================================================================
    ChargeLog — บันทึกการชาร์จ EV  (เก็บถาวรด้วย window.storage)
    ========================================================================= */
@@ -108,46 +108,65 @@ export default function App() {
   const [pmode, setPmode] = useState("M"); // D | M | Y | All
   const [psel, setPsel] = useState({ y: today.getFullYear(), m: today.getMonth() + 1, d: today.getDate() });
 
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
   useEffect(() => {
-    const uid = getUserId();
-    (async () => {
-      try {
-        const { data: sessData } = await supabase
-          .from('sessions').select('*').eq('user_id', uid).order('datetime', { ascending: true });
-        if (sessData && sessData.length) {
-          const mapped = sessData.map((row) => ({
-            id: row.id, vehicleId: row.vehicle_id, datetime: row.datetime,
-            chargeType: row.charge_type, location: row.location,
-            odometer: row.odometer ?? "", kwh: row.kwh ?? "",
-            pricePerUnit: row.price_per_unit ?? "", totalCost: row.total_cost ?? "",
-            startPercent: row.start_percent ?? "", endPercent: row.end_percent ?? "",
-            efficiency: row.efficiency ?? "", note: row.note ?? "",
-          }));
-          setSessions(mapped);
-        }
-      } catch (e) { console.error('load sessions error', e); }
-      try {
-        const { data: stData } = await supabase
-          .from('user_settings').select('data').eq('user_id', uid).single();
-        if (stData && stData.data) {
-          const st = stData.data;
-          if (!st.vehicles || !st.vehicles.length) st.vehicles = [{ id: "v1", name: "Jaecoo 5 EV", startOdo: 0 }];
-          st.vehicles = st.vehicles.map((v) => ({
-            startOdo: 0, ...v,
-            tripA: v.tripA || tripDefault(v.startOdo || 0),
-            tripB: v.tripB || tripDefault(v.startOdo || 0),
-          }));
-          if (!st.activeVehicle) st.activeVehicle = st.vehicles[0].id;
-          setSettings(st);
-        }
-      } catch (e) { console.error('load settings error', e); }
-      setLoading(false);
-    })();
+    // ตรวจสอบ session เมื่อเปิดแอป
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) loadData(session.user.id);
+      else { setLoading(false); setAuthChecked(true); }
+    });
+    // ฟัง auth state changes (login/logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const u = session?.user ?? null;
+      setUser(u);
+      setAuthChecked(true);
+      if (u) loadData(u.id);
+      else { setSessions([]); setLoading(false); }
+    });
+    return () => subscription.unsubscribe();
   }, []);
+
+  const loadData = async (uid) => {
+    try {
+      const { data: sessData } = await supabase
+        .from('sessions').select('*').eq('user_id', uid).order('datetime', { ascending: true });
+      if (sessData && sessData.length) {
+        const mapped = sessData.map((row) => ({
+          id: row.id, vehicleId: row.vehicle_id, datetime: row.datetime,
+          chargeType: row.charge_type, location: row.location,
+          odometer: row.odometer ?? "", kwh: row.kwh ?? "",
+          pricePerUnit: row.price_per_unit ?? "", totalCost: row.total_cost ?? "",
+          startPercent: row.start_percent ?? "", endPercent: row.end_percent ?? "",
+          efficiency: row.efficiency ?? "", note: row.note ?? "",
+        }));
+        setSessions(mapped);
+      }
+    } catch (e) { console.error('load sessions error', e); }
+    try {
+      const { data: stData } = await supabase
+        .from('user_settings').select('data').eq('user_id', uid).single();
+      if (stData && stData.data) {
+        const st = stData.data;
+        if (!st.vehicles || !st.vehicles.length) st.vehicles = [{ id: "v1", name: "Jaecoo 5 EV", startOdo: 0 }];
+        st.vehicles = st.vehicles.map((v) => ({
+          startOdo: 0, ...v,
+          tripA: v.tripA || tripDefault(v.startOdo || 0),
+          tripB: v.tripB || tripDefault(v.startOdo || 0),
+        }));
+        if (!st.activeVehicle) st.activeVehicle = st.vehicles[0].id;
+        setSettings(st);
+      }
+    } catch (e) { console.error('load settings error', e); }
+    setLoading(false);
+    setAuthChecked(true);
+  };
 
   const persistSessions = async (next) => {
     setSessions(next);
-    const uid = getUserId();
+    const uid = user?.id; if (!uid) return;
     try {
       const { data: existing } = await supabase.from('sessions').select('id').eq('user_id', uid);
       const existingIds = new Set((existing || []).map((r) => r.id));
@@ -175,7 +194,7 @@ export default function App() {
 
   const persistSettings = async (next) => {
     setSettings(next);
-    const uid = getUserId();
+    const uid = user?.id; if (!uid) return;
     try {
       await supabase.from('user_settings').upsert({ user_id: uid, data: next, updated_at: new Date().toISOString() });
     } catch (e) { console.error('persist settings error', e); }
@@ -298,8 +317,28 @@ export default function App() {
     const out = []; for (let y = max; y >= min; y--) out.push(y); return out;
   }, [sessions]);
 
-  if (loading) {
+  if (!authChecked || loading) {
     return (<div style={styles.page}><Fonts /><div style={{ ...styles.shell, display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh", color: COLORS.muted }}>กำลังโหลด…</div></div>);
+  }
+
+  if (!user) {
+    return (
+      <div style={styles.page}>
+        <Fonts />
+        <div style={{ ...styles.shell, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", gap: 20, textAlign: "center" }}>
+          <div style={{ width: 80, height: 80, borderRadius: 24, background: `linear-gradient(135deg, ${COLORS.teal}, ${COLORS.green})`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 12px 26px rgba(14,124,102,0.3)" }}>
+            <BoltIcon big />
+          </div>
+          <div style={{ fontFamily: "'IBM Plex Sans Thai', sans-serif", fontWeight: 700, fontSize: 26, color: COLORS.ink }}>ChargeLog</div>
+          <div style={{ fontSize: 14, color: COLORS.muted, maxWidth: 280, lineHeight: 1.6 }}>บันทึกการชาร์จ EV ที่บ้าน คำนวณค่าไฟ ระยะทาง และประสิทธิภาพอัตโนมัติ</div>
+          <button onClick={signInWithGoogle} style={{ display: "flex", alignItems: "center", gap: 12, background: "#fff", border: "1.5px solid #DCE3DC", borderRadius: 14, padding: "14px 24px", fontSize: 15, fontWeight: 600, cursor: "pointer", color: COLORS.ink, boxShadow: "0 4px 12px rgba(0,0,0,0.08)", fontFamily: "'IBM Plex Sans Thai', sans-serif" }}>
+            <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+            Sign in with Google
+          </button>
+          <div style={{ fontSize: 12, color: COLORS.faint, marginTop: 8 }}>เปลี่ยนมือถือหรืออุปกรณ์ ข้อมูลก็ยังอยู่ครบ</div>
+        </div>
+      </div>
+    );
   }
 
   const headerName = isAll ? "ทุกคัน (All Cars)" : activeV.name;
@@ -314,7 +353,13 @@ export default function App() {
             <span style={styles.vehicleName}>{headerName}</span>
             <ChevronIcon />
           </button>
-          <button style={styles.gear} onClick={() => setShowSettings(true)} aria-label="ตั้งค่า"><GearIcon /></button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 10, color: COLORS.faint, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.email}</div>
+            </div>
+            <button style={styles.gear} onClick={() => setShowSettings(true)} aria-label="ตั้งค่า"><GearIcon /></button>
+            <button style={{ ...styles.gear, fontSize: 16 }} onClick={signOut} title="ออกจากระบบ">⏏</button>
+          </div>
         </header>
 
         <div style={styles.segment}>
