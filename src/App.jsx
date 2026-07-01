@@ -353,13 +353,7 @@ export default function App() {
             <span style={styles.vehicleName}>{headerName}</span>
             <ChevronIcon />
           </button>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 10, color: COLORS.faint, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.email}</div>
-            </div>
-            <button style={styles.gear} onClick={() => setShowSettings(true)} aria-label="ตั้งค่า"><GearIcon /></button>
-            <button style={{ ...styles.gear, fontSize: 16 }} onClick={signOut} title="ออกจากระบบ">⏏</button>
-          </div>
+          <button style={styles.gear} onClick={() => setShowSettings(true)} aria-label="ตั้งค่า"><GearIcon /></button>
         </header>
 
         <div style={styles.segment}>
@@ -394,7 +388,7 @@ export default function App() {
         />
       )}
       {showSettings && (
-        <SettingsSheet settings={settings} sessions={sessions}
+        <SettingsSheet settings={settings} sessions={sessions} user={user}
           onSave={persistSettings} onClose={() => setShowSettings(false)} onClearAll={() => persistSessions([])} />
       )}
       {showVehicles && (
@@ -1325,7 +1319,7 @@ function TripSheet({ vehicle, sessions, rate, onReset, onClose }) {
 }
 
 /* ============================ SETTINGS ============================ */
-function SettingsSheet({ settings, sessions, onSave, onClose, onClearAll }) {
+function SettingsSheet({ settings, sessions, user, onSave, onClose, onClearAll }) {
   const [r, setR] = useState(settings.rate);
 
   /* PIN setup */
@@ -1377,6 +1371,15 @@ function SettingsSheet({ settings, sessions, onSave, onClose, onClearAll }) {
       <div style={styles.sheet} onClick={(e) => e.stopPropagation()}>
         <div style={styles.sheetGrab} />
         <div style={styles.sheetTitle}>ตั้งค่า</div>
+        {user && (
+          <div style={styles.userInfo}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{user.user_metadata?.full_name || user.email}</div>
+              <div style={{ fontSize: 11.5, color: COLORS.faint, marginTop: 2 }}>{user.email}</div>
+            </div>
+            <button onClick={signOut} style={{ ...styles.btnDanger, padding: "8px 14px", fontSize: 13 }}>ออกจากระบบ</button>
+          </div>
+        )}
 
         <Field label="ค่าไฟต่อหน่วยเริ่มต้น (บาท/kWh)">
           <input type="number" inputMode="decimal" value={r} onChange={(e) => setR(e.target.value)} style={styles.input} />
@@ -1674,6 +1677,7 @@ const styles = {
   btnDanger: { border: "none", background: "#FCE3E3", color: "#CC3A3A", borderRadius: 9, padding: "6px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'IBM Plex Sans Thai', sans-serif" },
   btnDangerWide: { width: "100%", border: "1px solid #F1CCCC", background: "#FDF2F2", color: "#CC3A3A", borderRadius: 12, padding: "13px", fontSize: 14.5, fontWeight: 600, cursor: "pointer", fontFamily: "'IBM Plex Sans Thai', sans-serif" },
 
+  userInfo: { display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 12, background: "#F4F7F4", border: `1px solid ${COLORS.line}`, marginBottom: 16 },
   pinStatusRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderRadius: 12, border: `1px solid ${COLORS.line}`, background: "#FAFBFA", marginBottom: 14 },
   pinBox: { border: `1.5px solid ${COLORS.line}`, borderRadius: 14, padding: 14, marginBottom: 14, background: "#FAFBFA" },
   clearConfirmBox: { border: "1.5px solid #F1CCCC", borderRadius: 14, padding: 16, marginBottom: 14, background: "#FDF5F5", textAlign: "center" },
