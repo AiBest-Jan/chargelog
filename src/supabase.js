@@ -11,7 +11,7 @@ export const signInWithGoogle = async () => {
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: 'https://chargelog-ai-best.vercel.app',
+      redirectTo: 'https://chargelog-psi.vercel.app',
     },
   })
   if (error) console.error('Login error:', error)
